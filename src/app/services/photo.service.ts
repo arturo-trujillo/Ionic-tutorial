@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { Camera,CameraResultType, CameraSource, Photo } from '@capacitor/camera';
+import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Storage } from '@capacitor/storage';
-import { resolve, Resolver } from 'dns';
+import { Platform } from '@ionic/angular';
 
 export interface UserPhoto{
   filepath:string;
@@ -14,7 +15,11 @@ export interface UserPhoto{
 })
 export class PhotoService {
     public photos : UserPhoto[] = [];
-  constructor() { }
+    private PHOTO_STORAGE : string = 'photos';
+    private platform :Platform;
+  constructor(platform:Platform) {
+    this.platform = platform;
+   }
 
 private async savePicture(photo: Photo){
   const base64Data = await this.readAsBase64(photo);
@@ -25,19 +30,35 @@ private async savePicture(photo: Photo){
     data: base64Data,
     directory: Directory.Data
   });
-
-  return {
-    filepath: fileName,
-    webviewPath: photo.webPath
-  };
+  if (this.platform.is('hybrid')) {
+    return {
+      filepath: savedFile.uri,
+      webviewPath: Capacitor.convertFileSrc(savedFile.uri),
+    };
+  }
+  else {
+    return {
+      filepath: fileName,
+      webviewPath: photo.webPath
+    };
+  }
 
 }
 
-private async readAsBase64(photo: Photo){
-  const response = await fetch(photo.webPath!);
-  const blob = await response.blob();
+private async readAsBase64(photo: Photo) {
+  if (this.platform.is('hybrid')) {
+    const file = await Filesystem.readFile({
+      path: photo.path
+    });
 
-  return await this.convertBlobToBase64(blob) as string;
+    return file.data;
+  }
+  else {
+    const response = await fetch(photo.webPath);
+    const blob = await response.blob();
+
+    return await this.convertBlobToBase64(blob) as string;
+  }
 }
 
 private convertBlobToBase64 = (blob: Blob) => new Promise((resolve, reject) => {
@@ -58,6 +79,17 @@ public async addNewToGallery() {
   
   const savedImageFile =  await this.savePicture(capturedPhoto);
   this.photos.unshift(savedImageFile);
+
+  Storage.set({
+    key: this.PHOTO_STORAGE,
+    value: JSON.stringify(this.photos),
+  });
+}
+
+public async loadSaved() {
+  const photoList = await Storage.get({ key: this.PHOTO_STORAGE });
+  this.photos = JSON.parse(photoList.value) || [];
+
 }
 }
 
